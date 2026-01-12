@@ -8,115 +8,118 @@ from flask_restful import Api, Resource
 from models import db, Newsletter
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///newsletters.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///newsletters.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.json.compact = False
 
-migrate = Migrate(app, db)
 db.init_app(app)
+migrate = Migrate(app, db)
 
+ma = Marshmallow(app)
 api = Api(app)
 
-class Index(Resource):
+# -----------------------
+# SCHEMA (HATEOAS)
+# -----------------------
+class NewsletterSchema(ma.SQLAlchemySchema):
 
-    def get(self):
-        
-        response_dict = {
-            "index": "Welcome to the Newsletter RESTful API",
+    class Meta:
+        model = Newsletter
+        load_instance = True
+
+    id = ma.auto_field()
+    title = ma.auto_field()
+    published_at = ma.auto_field()
+
+    url = ma.Hyperlinks(
+        {
+            "self": ma.URLFor(
+                "newsletterbyid",
+                values={"id": "<id>"}
+            ),
+            "collection": ma.URLFor("newsletters"),
         }
-        
-        response = make_response(
-            response_dict,
-            200,
+    )
+
+
+newsletter_schema = NewsletterSchema()
+newsletters_schema = NewsletterSchema(many=True)
+
+# -----------------------
+# ROUTES
+# -----------------------
+class Index(Resource):
+    def get(self):
+        return make_response(
+            {"message": "Welcome to the Newsletter RESTful API"},
+            200
         )
 
-        return response
+api.add_resource(Index, "/", endpoint="index")
 
-api.add_resource(Index, '/')
 
 class Newsletters(Resource):
-
     def get(self):
-        
-        response_dict_list = [n.to_dict() for n in Newsletter.query.all()]
-
-        response = make_response(
-            response_dict_list,
-            200,
+        newsletters = Newsletter.query.all()
+        return make_response(
+            newsletters_schema.dump(newsletters),
+            200
         )
-
-        return response
 
     def post(self):
-        
-        new_record = Newsletter(
-            title=request.form['title'],
-            body=request.form['body'],
+        newsletter = Newsletter(
+            title=request.form["title"],
+            body=request.form["body"],
         )
 
-        db.session.add(new_record)
+        db.session.add(newsletter)
         db.session.commit()
 
-        response_dict = new_record.to_dict()
-
-        response = make_response(
-            response_dict,
-            201,
+        return make_response(
+            newsletter_schema.dump(newsletter),
+            201
         )
 
-        return response
+api.add_resource(Newsletters, "/newsletters", endpoint="newsletters")
 
-api.add_resource(Newsletters, '/newsletters')
 
 class NewsletterByID(Resource):
-
     def get(self, id):
-
-        response_dict = Newsletter.query.filter_by(id=id).first().to_dict()
-
-        response = make_response(
-            response_dict,
-            200,
+        newsletter = Newsletter.query.filter_by(id=id).first()
+        return make_response(
+            newsletter_schema.dump(newsletter),
+            200
         )
-
-        return response
 
     def patch(self, id):
+        newsletter = Newsletter.query.filter_by(id=id).first()
 
-        record = Newsletter.query.filter_by(id=id).first()
         for attr in request.form:
-            setattr(record, attr, request.form[attr])
+            setattr(newsletter, attr, request.form[attr])
 
-        db.session.add(record)
         db.session.commit()
 
-        response_dict = record.to_dict()
-
-        response = make_response(
-            response_dict,
+        return make_response(
+            newsletter_schema.dump(newsletter),
             200
         )
-
-        return response
 
     def delete(self, id):
-
-        record = Newsletter.query.filter_by(id=id).first()
-        
-        db.session.delete(record)
+        newsletter = Newsletter.query.filter_by(id=id).first()
+        db.session.delete(newsletter)
         db.session.commit()
 
-        response_dict = {"message": "record successfully deleted"}
+        return make_response("", 204)
 
-        response = make_response(
-            response_dict,
-            200
-        )
+api.add_resource(
+    NewsletterByID,
+    "/newsletters/<int:id>",
+    endpoint="newsletterbyid"
+)
 
-        return response
-
-api.add_resource(NewsletterByID, '/newsletters/<int:id>')
-
-
-if __name__ == '__main__':
+# -----------------------
+# RUN SERVER
+# -----------------------
+if __name__ == "__main__":
     app.run(port=5555, debug=True)
